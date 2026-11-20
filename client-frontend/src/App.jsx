@@ -182,6 +182,9 @@ export default function App() {
   // The bar only fills once the application is signed, not on reaching the signature step.
   const progressPct = signed ? 100 : Math.round((step / steps.length) * 100);
 
+  // Signed: the full-page thank-you screen, which moves on to aionioncapital.com after 5 seconds.
+  if (signed && state) return <Completion token={token} application={state.application} />;
+
   return (
     <div className="app-shell">
       <div className="orb orb1" />
