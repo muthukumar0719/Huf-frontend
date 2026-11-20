@@ -696,6 +696,7 @@ function PanName({ show, lookup, label, who }) {
   );
 }
 function Pan({ data, set, setKarta, attempted }) {
+  const setAddress = (k, v) => set("statementAddress", { ...data.statementAddress, [k]: v });
   const hufValid = !hufPanError(data.hufPan);
   const kartaValid = !kartaPanError(data.karta.pan);
   const hufName = usePanName("huf", data.hufPan, hufValid);
@@ -748,6 +749,35 @@ function Pan({ data, set, setKarta, attempted }) {
             onChange={(f) => set("kartaPanFile", f)}
           />
         </div>
+      </div>
+      <h3 className="subhead">HUF Bank Statement Address</h3>
+      <p className="field-help">
+        Type the HUF address exactly as it is printed on the HUF bank statement.
+      </p>
+      <div className="address-grid">
+        <TextField
+          label="Address (as per HUF bank statement)"
+          required
+          wide
+          multiline
+          maxLength={300}
+          placeholder="Door no., street, area, landmark - as on the HUF bank statement"
+          value={data.statementAddress.address}
+          onChange={(v) => setAddress("address", v)}
+          rule={statementAddressRules.address}
+          attempted={attempted}
+        />
+        {addressFields().map(({ k, ...f }) => (
+          <TextField
+            key={k}
+            {...f}
+            required
+            rule={statementAddressRules[k]}
+            value={data.statementAddress[k]}
+            onChange={(v) => setAddress(k, v)}
+            attempted={attempted}
+          />
+        ))}
       </div>
     </>
   );
@@ -816,7 +846,6 @@ function BankInfo({ lookup, verification, ifsc }) {
   );
 }
 function Bank({ data, set, attempted }) {
-  const setAddress = (k, v) => set("statementAddress", { ...data.statementAddress, [k]: v });
   const lookup = useBankLookup(data.ifsc, set, data.micr);
   // A verification belongs to the account and IFSC it was made for.
   const verification =
@@ -900,35 +929,6 @@ function Bank({ data, set, attempted }) {
         />
       </div>
       <BankInfo lookup={lookup} verification={verification} ifsc={data.ifsc} />
-      <h3 className="subhead">HUF Bank Statement Address</h3>
-      <p className="field-help">
-        Type the HUF address exactly as it is printed on the HUF bank statement.
-      </p>
-      <div className="address-grid">
-        <TextField
-          label="Address (as per HUF bank statement)"
-          required
-          wide
-          multiline
-          maxLength={300}
-          placeholder="Door no., street, area, landmark - as on the HUF bank statement"
-          value={data.statementAddress.address}
-          onChange={(v) => setAddress("address", v)}
-          rule={statementAddressRules.address}
-          attempted={attempted}
-        />
-        {addressFields().map(({ k, ...f }) => (
-          <TextField
-            key={k}
-            {...f}
-            required
-            rule={statementAddressRules[k]}
-            value={data.statementAddress[k]}
-            onChange={(v) => setAddress(k, v)}
-            attempted={attempted}
-          />
-        ))}
-      </div>
       <Upload
         label="Latest 3-Month HUF Bank Statement"
         required
@@ -1209,7 +1209,7 @@ function Preview({ data, link, onEdit }) {
         />
         <Review
           title="HUF Bank Statement Address"
-          onEdit={onEdit ? () => onEdit(1) : undefined}
+          onEdit={onEdit ? () => onEdit(0) : undefined}
           rows={{
             Address: data.statementAddress.address,
             City: data.statementAddress.city,
@@ -1441,6 +1441,11 @@ function validate(step, d) {
   }
   if (step === 0 && (!d.hufPanFile || !d.kartaPanFile))
     throw Error("Upload both HUF PAN and Karta PAN.");
+  if (step === 0)
+    for (const [k, rule] of Object.entries(statementAddressRules)) {
+      const issue = rule(d.statementAddress[k]);
+      if (issue) throw Error("HUF bank statement address: " + issue);
+    }
   if (step === 1) {
     const error =
       rules.accountNumber(d.bankAccountNumber) ||
@@ -1449,10 +1454,6 @@ function validate(step, d) {
       rules.micr(d.micr) ||
       rules.accountType(d.bankAccountType);
     if (error) throw Error(error);
-    for (const [k, rule] of Object.entries(statementAddressRules)) {
-      const issue = rule(d.statementAddress[k]);
-      if (issue) throw Error("HUF bank statement address: " + issue);
-    }
     if (!d.bankStatement)
       throw Error("Upload the latest 3-month HUF bank statement.");
   }
