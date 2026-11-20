@@ -31,7 +31,9 @@ export async function getApplicationPdf(token) {
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "The application form could not be loaded.");
   return res.blob();
 }
-export const giveConsent = (token) => post(at(token, "/consent"), { confirmed: true });
+// A short-lived S3 link to the signed form (null when the server stores files locally).
+export const getApplicationPdfLink = (token) => call(at(token, "/application-pdf-link")).then((r) => r.url || null);
+export const giveConsent =(token) => post(at(token, "/consent"), { confirmed: true });
 export const sendOtp = (token, channel, entered) =>
   post(at(token, "/otp/send"), { channel, [channel === "MOBILE" ? "mobile" : "email"]: entered });
 export const verifyOtp = (token, channel, code) => post(at(token, "/otp/verify"), { channel, code });

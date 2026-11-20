@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, ClipboardList, ExternalLink, ArrowRight, Download, Loader2 } from "lucide-react";
-import { getApplicationPdf } from "./api";
+import { getApplicationPdf, getApplicationPdfLink } from "./api";
 import { SectionTitle, Review } from "./ui.jsx";
 
 // Where the client goes once the HUF journey is finished.
@@ -18,6 +18,14 @@ export default function Completion({ token, application, signature }) {
   const downloadForm = async () => {
     setDownload("busy");
     try {
+      // Live: a temporary S3 link that downloads the form directly (it is too large to pass
+      // through the API). Local development: the PDF bytes from the server.
+      const link = await getApplicationPdfLink(token);
+      if (link) {
+        window.location.assign(link); // S3 sends it as a download, so this page stays open
+        setDownload("");
+        return;
+      }
       const url = URL.createObjectURL(await getApplicationPdf(token));
       const a = Object.assign(document.createElement("a"), { href: url, download: `HUF_Account_Opening_${application?.id || ""}.pdf` });
       a.click();
