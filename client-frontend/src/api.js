@@ -1,4 +1,8 @@
-const API = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// VITE_API_URL wins when set at build time; otherwise a production build uses the live API Gateway
+// and `npm run dev` uses the local server.
+const API =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? "https://68oiix3z2e.execute-api.ap-south-1.amazonaws.com/api" : "http://localhost:5000/api");
 
 async function call(path, options) {
   let res;
