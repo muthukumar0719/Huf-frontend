@@ -1,4 +1,4 @@
-import { mobileError, emailError, gmailError, GMAIL_DOMAIN } from "./contactValidation";
+import { mobileError, gmailError, GMAIL_DOMAIN } from "./contactValidation";
 import React, { useEffect, useId, useMemo, useState } from "react";
 import {
   Landmark,
@@ -13,7 +13,7 @@ import {
   CheckCircle2,
   Link as LinkIcon,
 } from "lucide-react";
-import { saveHufStage, submitHufApplication, resendClientLink, getBankByIfsc, getHufPanName } from "./api";
+import { saveHufStage, submitHufApplication, resendClientLink, getBankByIfsc, getPanName } from "./api";
 
 const emptyCoparcener = () => ({
   id: crypto.randomUUID(),
@@ -21,10 +21,7 @@ const emptyCoparcener = () => ({
   pan: "",
   relationship: "",
   dob: "",
-  email: "",
-  mobile: "",
   isMinor: false,
-  guardianName: "",
   signature: null,
 });
 const initial = {
@@ -39,6 +36,8 @@ const initial = {
   micr: "",
   bankAccountType: "",
   bankStatement: null,
+  // HUF address exactly as printed on the HUF bank statement (Bank screen).
+  statementAddress: { address: "", city: "", district: "", state: "", pincode: "" },
   karta: {
     fullName: "",
     pan: "",
@@ -60,6 +59,7 @@ const initial = {
   },
   coparceners: [emptyCoparcener()],
   hufDeed: null,
+  kartaAadhaarFile: null,
   declarations: { accuracy: false, consent: false, review: false },
 };
 
@@ -348,22 +348,31 @@ function DobInput({ value, onChange, ...props }) {
     />
   );
 }
-function Field({ label, children, wide = false }) {
+// required: shows a red * after the label (mandatory field).
+function Field({ label, children, wide = false, required = false }) {
   return (
     <label className={`field ${wide ? "wide" : ""}`}>
-      <span>{label}</span>
+      <span>
+        {label}
+        {required && (
+          <span className="req" aria-hidden="true">
+            *
+          </span>
+        )}
+      </span>
       {children}
     </label>
   );
 }
 // Dropdown with the same helper/error text as TextField.
-function SelectField({ label, value, onChange, options, rule, help, attempted }) {
+function SelectField({ label, value, onChange, options, rule, help, attempted, required }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
   const issue = attempted || touched ? rule?.(value) || "" : "";
   return (
-    <Field label={label}>
+    <Field label={label} required={required}>
       <select
+        aria-required={required || undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={() => setTouched(true)}
@@ -398,6 +407,7 @@ function TextField({
   wide,
   multiline,
   masked,
+  required,
   ...inputProps
 }) {
   const id = useId();
@@ -408,9 +418,10 @@ function TextField({
   // Masked fields hide every character until focused again.
   const shown = masked && !focused ? "•".repeat(value.length) : value;
   return (
-    <Field label={label} wide={wide}>
+    <Field label={label} wide={wide} required={required}>
       <Tag
         type={multiline ? undefined : "text"}
+        aria-required={required || undefined}
         {...inputProps}
         value={shown}
         onChange={(e) => onChange(sanitize(e.target.value))}
@@ -434,12 +445,12 @@ function TextField({
     </Field>
   );
 }
-function DobField({ label = "Date of Birth", value, onChange, rule, attempted }) {
+function DobField({ label = "Date of Birth", value, onChange, rule, attempted, required }) {
   const id = useId();
   const [touched, setTouched] = useState(false);
   const issue = attempted || touched ? rule(value) : "";
   return (
-    <Field label={label}>
+    <Field label={label} required={required}>
       <DobInput
         value={value}
         onChange={onChange}
@@ -463,7 +474,7 @@ function formatSize(bytes) {
     ? (bytes / (1024 * 1024)).toFixed(1) + " MB"
     : Math.max(1, Math.round(bytes / 1024)) + " KB";
 }
-function Upload({ label, value, onChange, accept = ".pdf,.jpg,.jpeg,.png" }) {
+function Upload({ label, value, onChange, accept = ".pdf,.jpg,.jpeg,.png", required = false }) {
   const [error, setError] = useState("");
   const allowed = accept.split(",");
   const types = [
@@ -487,7 +498,14 @@ function Upload({ label, value, onChange, accept = ".pdf,.jpg,.jpeg,.png" }) {
     <label className={`upload ${done ? "done" : ""} ${error ? "invalid" : ""}`}>
       {done ? <CheckCircle2 size={22} /> : <UploadCloud size={22} />}
       <div className="upload-text">
-        <b>{label}</b>
+        <b>
+          {label}
+          {required && (
+            <span className="req" aria-hidden="true">
+              *
+            </span>
+          )}
+        </b>
         {done ? (
           <small title={value.name}>
             <span className="upload-name">{value.name}</span>
@@ -528,7 +546,7 @@ function Contact({ data, set, attempted }) {
         sub="Start with the authorised contact details for this HUF application."
       />
       <div className="grid">
-        <Field label="Mobile Number">
+        <Field label="Mobile Number" required>
           <input
             type="tel"
             inputMode="numeric"
@@ -553,7 +571,7 @@ function Contact({ data, set, attempted }) {
               "10 digits, starting with 6, 7, 8 or 9. Do not include +91."}
           </small>
         </Field>
-        <Field label="Email ID">
+        <Field label="Email ID" required>
           <input
             type="email"
             inputMode="email"
@@ -599,7 +617,7 @@ function Contact({ data, set, attempted }) {
 }
 function PanNumberField({ id, label, value, onChange, error, help }) {
   return (
-    <Field label={label}>
+    <Field label={label} required>
       <input
         type="text"
         autoCapitalize="characters"
@@ -624,17 +642,16 @@ function PanNumberField({ id, label, value, onChange, error, help }) {
     </Field>
   );
 }
-function Pan({ data, set, setKarta, attempted }) {
+// Name on a PAN (ITR name) from Setu, looked up once the PAN number is valid.
+// kind: "huf" (HUF PAN) or "karta" (Karta PAN).
+function usePanName(kind, pan, valid) {
   const [lookup, setLookup] = useState(null);
   const [retry, setRetry] = useState(0);
-  const pan = data.hufPan;
-  const shouldLookup = !hufPanError(pan);
-  const currentLookup = shouldLookup && lookup?.pan === pan ? lookup : null;
   useEffect(() => {
-    if (!shouldLookup) return;
+    if (!valid) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      getHufPanName(pan, controller.signal)
+      getPanName(kind, pan, controller.signal)
         .then(({ full_name }) => {
           if (!controller.signal.aborted) setLookup({ pan, name: full_name });
         })
@@ -646,7 +663,43 @@ function Pan({ data, set, setKarta, attempted }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [pan, shouldLookup, retry]);
+  }, [kind, pan, valid, retry]);
+  return {
+    current: valid && lookup?.pan === pan ? lookup : null,
+    retry: () => {
+      setLookup(null);
+      setRetry((value) => value + 1);
+    },
+  };
+}
+// Read-only name fetched for a PAN, with progress / error + retry.
+function PanName({ show, lookup, label, who }) {
+  if (!show) return null;
+  const { current, retry } = lookup;
+  return (
+    <div aria-live="polite">
+      {current?.name ? (
+        <Field label={label}>
+          <input className="derived-input" value={current.name} readOnly />
+        </Field>
+      ) : current?.error ? (
+        <>
+          <small className="field-error">{current.error}</small>{" "}
+          <button className="mini" type="button" onClick={retry}>
+            Retry lookup
+          </button>
+        </>
+      ) : (
+        <small className="field-help">Fetching {who} name…</small>
+      )}
+    </div>
+  );
+}
+function Pan({ data, set, setKarta, attempted }) {
+  const hufValid = !hufPanError(data.hufPan);
+  const kartaValid = !kartaPanError(data.karta.pan);
+  const hufName = usePanName("huf", data.hufPan, hufValid);
+  const kartaName = usePanName("karta", data.karta.pan, kartaValid);
 
   const hufPanIssue =
     attempted || data.hufPan.length === 10 ? hufPanError(data.hufPan) : "";
@@ -666,40 +719,14 @@ function Pan({ data, set, setKarta, attempted }) {
             id="huf-pan-help"
             label="HUF PAN Number"
             value={data.hufPan}
-            onChange={(v) => {
-              setLookup(null);
-              set("hufPan", v);
-            }}
+            onChange={(v) => set("hufPan", v)}
             error={hufPanIssue}
             help="10 characters. The 4th letter must be H (e.g. ABCHE1234F)."
           />
-          {shouldLookup && (
-            <div aria-live="polite">
-              {currentLookup?.name ? (
-                <Field label="HUF Name">
-                  <input className="derived-input" value={currentLookup.name} readOnly />
-                </Field>
-              ) : currentLookup?.error ? (
-                <>
-                  <small className="field-error">{currentLookup.error}</small>{" "}
-                  <button
-                    className="mini"
-                    type="button"
-                    onClick={() => {
-                      setLookup(null);
-                      setRetry((value) => value + 1);
-                    }}
-                  >
-                    Retry lookup
-                  </button>
-                </>
-              ) : (
-                <small className="field-help">Fetching HUF name…</small>
-              )}
-            </div>
-          )}
+          <PanName show={hufValid} lookup={hufName} label="HUF Name (as per ITR)" who="HUF" />
           <Upload
             label="HUF PAN"
+            required
             value={data.hufPanFile}
             onChange={(f) => set("hufPanFile", f)}
           />
@@ -713,8 +740,10 @@ function Pan({ data, set, setKarta, attempted }) {
             error={kartaPanIssue}
             help="10 characters. The 4th letter must be P (e.g. ABCPE1234F)."
           />
+          <PanName show={kartaValid} lookup={kartaName} label="Karta Name (as per ITR)" who="Karta" />
           <Upload
             label="Karta PAN"
+            required
             value={data.kartaPanFile}
             onChange={(f) => set("kartaPanFile", f)}
           />
@@ -787,6 +816,7 @@ function BankInfo({ lookup, verification, ifsc }) {
   );
 }
 function Bank({ data, set, attempted }) {
+  const setAddress = (k, v) => set("statementAddress", { ...data.statementAddress, [k]: v });
   const lookup = useBankLookup(data.ifsc, set, data.micr);
   // A verification belongs to the account and IFSC it was made for.
   const verification =
@@ -802,6 +832,7 @@ function Bank({ data, set, attempted }) {
       <div className="grid">
         <TextField
           label="Bank Account Number"
+          required
           inputMode="numeric"
           autoComplete="off"
           maxLength={18}
@@ -816,6 +847,7 @@ function Bank({ data, set, attempted }) {
         />
         <TextField
           label="Confirm Account Number"
+          required
           inputMode="numeric"
           autoComplete="off"
           maxLength={18}
@@ -831,6 +863,7 @@ function Bank({ data, set, attempted }) {
         />
         <TextField
           label="IFSC"
+          required
           autoCapitalize="characters"
           spellCheck={false}
           maxLength={11}
@@ -844,6 +877,7 @@ function Bank({ data, set, attempted }) {
         />
         <TextField
           label="MICR"
+          required
           inputMode="numeric"
           maxLength={9}
           placeholder="9-digit MICR"
@@ -856,6 +890,7 @@ function Bank({ data, set, attempted }) {
         />
         <SelectField
           label="Account Type"
+          required
           options={ACCOUNT_TYPES}
           value={data.bankAccountType}
           onChange={(v) => set("bankAccountType", v)}
@@ -865,8 +900,38 @@ function Bank({ data, set, attempted }) {
         />
       </div>
       <BankInfo lookup={lookup} verification={verification} ifsc={data.ifsc} />
+      <h3 className="subhead">HUF Bank Statement Address</h3>
+      <p className="field-help">
+        Type the HUF address exactly as it is printed on the HUF bank statement.
+      </p>
+      <div className="address-grid">
+        <TextField
+          label="Address (as per HUF bank statement)"
+          required
+          wide
+          multiline
+          maxLength={300}
+          placeholder="Door no., street, area, landmark - as on the HUF bank statement"
+          value={data.statementAddress.address}
+          onChange={(v) => setAddress("address", v)}
+          rule={statementAddressRules.address}
+          attempted={attempted}
+        />
+        {addressFields().map(({ k, ...f }) => (
+          <TextField
+            key={k}
+            {...f}
+            required
+            rule={statementAddressRules[k]}
+            value={data.statementAddress[k]}
+            onChange={(v) => setAddress(k, v)}
+            attempted={attempted}
+          />
+        ))}
+      </div>
       <Upload
         label="Latest 3-Month HUF Bank Statement"
+        required
         value={data.bankStatement}
         onChange={(f) => set("bankStatement", f)}
         accept=".pdf"
@@ -887,8 +952,8 @@ const INCOME_RANGES = [
   "Above ₹1 Crore",
 ];
 const kartaFields = () => [
-  { k: "fullName", label: "Full Name", placeholder: "Full name as per PAN", sanitize: onlyLetters, rule: rules.kartaName, maxLength: 100 },
-  { k: "pan", label: "PAN", placeholder: "ABCDE1234F", sanitize: onlyAlnumUpper(10), rule: kartaPanError, maxLength: 10, autoCapitalize: "characters", help: "Individual PAN: the 4th letter must be P." },
+  { k: "fullName", label: "Full Name", required: true, placeholder: "Full name as per PAN", sanitize: onlyLetters, rule: rules.kartaName, maxLength: 100 },
+  { k: "pan", label: "PAN", required: true, placeholder: "ABCDE1234F", sanitize: onlyAlnumUpper(10), rule: kartaPanError, maxLength: 10, autoCapitalize: "characters", help: "Individual PAN: the 4th letter must be P." },
   { k: "dob" },
   { k: "gender", label: "Gender", options: GENDERS, rule: rules.gender, help: "Select the Karta's gender." },
   { k: "fatherName", label: "Father's Name", placeholder: "Father's full name", sanitize: onlyLetters, rule: rules.fatherName, maxLength: 100 },
@@ -951,7 +1016,7 @@ function People({ data, setKarta, setCp, setData, attempted }) {
             />
           ),
         )}
-        <Field label="PEP Status">
+        <Field label="PEP Status" required>
           <select
             value={data.karta.pep}
             onChange={(e) => setKarta("pep", e.target.value)}
@@ -1022,7 +1087,7 @@ function People({ data, setKarta, setCp, setData, attempted }) {
               )}
             </div>
             <div className="grid compact">
-              <Field label="Relationship">
+              <Field label="Relationship" required>
                 <select
                   value={c.relationship}
                   onChange={(e) => setCp(c.id, "relationship", e.target.value)}
@@ -1037,6 +1102,7 @@ function People({ data, setKarta, setCp, setData, attempted }) {
               </Field>
               <TextField
                 label="Full Name"
+                required
                 maxLength={100}
                 placeholder="Full name as per PAN"
                 value={c.fullName}
@@ -1053,32 +1119,7 @@ function People({ data, setKarta, setCp, setData, attempted }) {
                 }}
                 rule={rules.cpDob}
                 attempted={attempted}
-              />
-              <TextField
-                label="Mobile"
-                type="tel"
-                inputMode="numeric"
-                maxLength={10}
-                placeholder="10-digit mobile"
-                value={c.mobile}
-                onChange={(v) => setCp(c.id, "mobile", v)}
-                sanitize={onlyDigits(10)}
-                rule={rules.cpMobile}
-                attempted={attempted}
-              />
-              <TextField
-                label="Email"
-                type="email"
-                inputMode="email"
-                autoCapitalize="none"
-                spellCheck={false}
-                maxLength={254}
-                placeholder="name@example.com"
-                value={c.email}
-                onChange={(v) => setCp(c.id, "email", v)}
-                sanitize={(v) => v.trim()}
-                rule={rules.cpEmail}
-                attempted={attempted}
+                required
               />
               <Field label="Minor?">
                 <input
@@ -1099,21 +1140,10 @@ function People({ data, setKarta, setCp, setData, attempted }) {
                   A co-parcener under 18 is a minor.
                 </small>
               </Field>
-              {c.isMinor && (
-                <TextField
-                  label="Guardian Name (optional)"
-                  maxLength={100}
-                  placeholder="Guardian's full name"
-                  value={c.guardianName}
-                  onChange={(v) => setCp(c.id, "guardianName", v)}
-                  sanitize={onlyLetters}
-                  rule={rules.guardianName}
-                  attempted={attempted}
-                />
-              )}
             </div>
             <Upload
-              label={`Signature - ${c.fullName || `Co-parcener ${idx + 1}`}`}
+              label={`HUF Seal with Sign - ${c.fullName || `Co-parcener ${idx + 1}`}`}
+              required
               value={c.signature}
               onChange={(f) => setCp(c.id, "signature", f)}
               accept=".png,.jpg,.jpeg"
@@ -1128,14 +1158,23 @@ function HufDocs({ data, set }) {
   return (
     <>
       <SectionTitle
-        title="Stamped / Sealed HUF Deed"
-        sub="Upload one HUF deed document bearing the stamp or seal, collected from the client."
+        title="Stamped / Sealed HUF Deed & Karta Aadhaar"
+        sub="Upload the HUF deed bearing the stamp or seal, and the Karta's Aadhaar card, collected from the client."
       />
-      <Upload
-        label="HUF Deed with Stamp / Seal"
-        value={data.hufDeed}
-        onChange={(file) => set("hufDeed", file)}
-      />
+      <div className="upload-grid">
+        <Upload
+          label="HUF Deed with Stamp / Seal"
+          required
+          value={data.hufDeed}
+          onChange={(file) => set("hufDeed", file)}
+        />
+        <Upload
+          label="Karta Aadhaar Card"
+          required
+          value={data.kartaAadhaarFile}
+          onChange={(file) => set("kartaAadhaarFile", file)}
+        />
+      </div>
     </>
   );
 }
@@ -1169,6 +1208,17 @@ function Preview({ data, link, onEdit }) {
           }}
         />
         <Review
+          title="HUF Bank Statement Address"
+          onEdit={onEdit ? () => onEdit(1) : undefined}
+          rows={{
+            Address: data.statementAddress.address,
+            City: data.statementAddress.city,
+            District: data.statementAddress.district,
+            State: data.statementAddress.state,
+            Pincode: data.statementAddress.pincode,
+          }}
+        />
+        <Review
           title="Karta Personal Profile"
           onEdit={onEdit ? () => onEdit(2) : undefined}
           rows={{
@@ -1176,8 +1226,8 @@ function Preview({ data, link, onEdit }) {
             PAN: data.karta.pan,
             "Date of Birth": displayDob(data.karta.dob),
             Gender: data.karta.gender,
-            "Father?s Name": data.karta.fatherName,
-            "Mother?s Name": data.karta.motherName,
+            "Father's Name": data.karta.fatherName,
+            "Mother's Name": data.karta.motherName,
             Occupation: data.karta.occupation,
             "Place of Incorporation": data.karta.placeOfIncorporation,
             "Annual Income": data.karta.annualIncome,
@@ -1204,7 +1254,10 @@ function Preview({ data, link, onEdit }) {
         <Review
           title="HUF Documents"
           onEdit={onEdit ? () => onEdit(3) : undefined}
-          rows={{ "Stamped / Sealed HUF Deed": data.hufDeed?.name }}
+          rows={{
+            "Stamped / Sealed HUF Deed": data.hufDeed?.name,
+            "Karta Aadhaar Card": data.kartaAadhaarFile?.name,
+          }}
         />
         {data.coparceners.map((c, i) => (
           <Review
@@ -1215,11 +1268,8 @@ function Preview({ data, link, onEdit }) {
               Name: c.fullName,
               Relationship: c.relationship,
               "Date of Birth": displayDob(c.dob),
-              Mobile: c.mobile,
-              Email: c.email,
               Minor: c.isMinor ? "Yes" : "No",
-              ...(c.isMinor && c.guardianName?.trim() ? { "Guardian Name": c.guardianName } : {}),
-              Signature: c.signature?.name,
+              "HUF Seal with Sign": c.signature?.name,
             }}
           />
         ))}
@@ -1272,6 +1322,7 @@ function safeForm(d) {
     kartaPanFile: null,
     bankStatement: null,
     hufDeed: null,
+    kartaAadhaarFile: null,
     coparceners: d.coparceners.map((c) => ({ ...c, signature: null })),
   };
 }
@@ -1369,9 +1420,15 @@ const rules = {
       : "",
   cpName: nameRule("co-parcener full name", true),
   cpDob: dobRule(true), // required: it decides whether the co-parcener is a minor
-  cpMobile: (v) => (blank(v) ? "" : mobileError(v)),
-  cpEmail: (v) => (blank(v) ? "" : emailError(v)),
-  guardianName: nameRule("guardian name", false),
+};
+// HUF bank statement address (same rules in server/src/hufValidation.js); every field is required.
+const statementAddressRules = {
+  address: (v) => (blank(v) ? "Enter the address as on the HUF bank statement." : ""),
+  city: nameRule("city", true),
+  district: nameRule("district", true),
+  state: nameRule("state", true),
+  pincode: (v) =>
+    /^[1-9]\d{5}$/.test(v || "") ? "" : "Pincode must be 6 digits and cannot start with 0.",
 };
 function validate(step, d) {
   if (step === 0) {
@@ -1392,6 +1449,10 @@ function validate(step, d) {
       rules.micr(d.micr) ||
       rules.accountType(d.bankAccountType);
     if (error) throw Error(error);
+    for (const [k, rule] of Object.entries(statementAddressRules)) {
+      const issue = rule(d.statementAddress[k]);
+      if (issue) throw Error("HUF bank statement address: " + issue);
+    }
     if (!d.bankStatement)
       throw Error("Upload the latest 3-month HUF bank statement.");
   }
@@ -1421,15 +1482,13 @@ function validate(step, d) {
         (c.relationship ? "" : "Select the relationship.") ||
         rules.cpName(c.fullName) ||
         rules.cpDob(c.dob) ||
-        rules.cpMobile(c.mobile) ||
-        rules.cpEmail(c.email) ||
-        (isMinorDob(c.dob) ? rules.guardianName(c.guardianName) : "") ||
-        (c.signature ? "" : "Upload the signature.");
+        (c.signature ? "" : "Upload the HUF seal with sign.");
       if (error) throw Error(`Co-parcener ${i + 1}: ${error}`);
     });
   }
   if (step === 3 && !d.hufDeed)
     throw Error("Upload the HUF deed with its stamp or seal.");
+  if (step === 3 && !d.kartaAadhaarFile) throw Error("Upload the Karta Aadhaar card.");
 }
 // Server stage saved by each form section (index = step); Preview has none.
 const STAGES = ["CONTACT_PAN", "BANK_DETAILS", "KARTA_COPARCENERS", "HUF_DOCUMENTS"];
@@ -1439,7 +1498,7 @@ function stageFiles(step, d) {
     [["hufPanFile", d.hufPanFile], ["kartaPanFile", d.kartaPanFile]],
     [["bankStatement", d.bankStatement]],
     d.coparceners.map((c) => [`signature:${c.id}`, c.signature]),
-    [["hufDeed", d.hufDeed]],
+    [["hufDeed", d.hufDeed], ["kartaAadhaarFile", d.kartaAadhaarFile]],
   ][step] || [];
   return files.filter(([, file]) => file);
 }

@@ -24,8 +24,9 @@ export function saveHufStage(stage, application, files, applicationId){
   for (const [field, file] of files) fd.append(field, file);
   return call('/huf/applications/stage', {method:'POST', body:fd});
 }
-export function getHufPanName(pan, signal){
-  return call('/huf/applications/pan/verify-huf', {
+// Name on the PAN (ITR name) from Setu: kind "huf" (HUF PAN) or "karta" (Karta PAN).
+export function getPanName(kind, pan, signal){
+  return call(`/huf/applications/pan/verify-${kind}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pan, consent: 'Y' }),

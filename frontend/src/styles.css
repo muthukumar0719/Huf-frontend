@@ -103,3 +103,6 @@ input,select,textarea,p,.field-help,.upload small{font-weight:400}
 .bank-info dt{font-size:12px;color:var(--muted)}
 .bank-info dd{margin:2px 0 0;font-weight:600;overflow-wrap:anywhere}
 @media(max-width:850px){.bank-info dl{grid-template-columns:1fr}}
+
+/* Mandatory field mark */
+.field span.req,.upload b .req{color:#c32d53;margin-left:3px;font-weight:700}
