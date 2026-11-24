@@ -961,7 +961,7 @@ const kartaFields = () => [
   { k: "occupation", label: "Occupation", placeholder: "e.g. Business", sanitize: (v) => v.replace(/[^A-Za-z &/.,-]/g, ""), rule: rules.occupation, maxLength: 60 },
   { k: "placeOfIncorporation", label: "Place of Incorporation", placeholder: "e.g. Chennai", sanitize: onlyLetters, rule: rules.placeOfIncorporation, maxLength: 100, help: "City or town where the HUF was formed." },
   { k: "annualIncome", label: "Annual Income", options: INCOME_RANGES, rule: rules.annualIncome, help: "Select the Karta's annual income range." },
-  { k: "netWorth", label: "Net Worth", options: NET_WORTH_RANGES, rule: rules.netWorth, help: "Select the Karta's net worth range." },
+  { k: "netWorth", label: "Net Worth (₹)", placeholder: "e.g. 2500000", sanitize: onlyDigits(13), rule: rules.netWorth, inputMode: "numeric", maxLength: 13, help: "Type the Karta's net worth in rupees (numbers only)." },
   { k: "aadhaarLast4", label: "Aadhaar Last 4 digits", placeholder: "e.g. 1234", sanitize: onlyDigits(4), rule: rules.aadhaarLast4, inputMode: "numeric", maxLength: 4 },
 ];
 // Shown together under Residential Address, in one row: City | District | State | Pincode.
@@ -1404,8 +1404,9 @@ const rules = {
       : "Occupation must contain letters only.",
   annualIncome: (v) =>
     blank(v) || INCOME_RANGES.includes(v) ? "" : "Select the annual income range.",
+  // Typed amount in rupees; older applications may still hold a saved range label.
   netWorth: (v) =>
-    blank(v) || NET_WORTH_RANGES.includes(v) ? "" : "Select the net worth range.",
+    blank(v) || /^[1-9]\d{0,12}$/.test(String(v).trim()) || NET_WORTH_RANGES.includes(v) ? "" : "Enter the net worth in numbers only.",
   aadhaarLast4: exactDigitsRule("Aadhaar last 4 digits", 4, false),
   city: nameRule("city", false),
   district: nameRule("district", false),
