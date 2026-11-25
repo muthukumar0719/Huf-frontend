@@ -3,7 +3,7 @@
 //   public/models/tiny_face_detector_model-shard1.txt
 // It detects human faces only, so a photo of an object, a pet or an empty frame finds no face.
 // The library (with TensorFlow.js) is loaded on demand so it does not slow the first page load.
-const MODEL_URL = "/models";
+const MODEL_URL = `${import.meta.env.BASE_URL}models`;
 const INPUT_SIZE = 416; // multiple of 32; larger finds smaller faces, at some speed cost
 const MIN_SCORE = 0.5; // detections below this confidence are ignored
 const MIN_FACE_SHARE = 0.08; // the face must be at least 8% of the photo's width (not a tiny face far away)
